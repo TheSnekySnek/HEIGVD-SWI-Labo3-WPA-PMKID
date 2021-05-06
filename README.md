@@ -9,7 +9,7 @@
 ## Screenshots
 Pmkid cracking script
 
-![PMKID script](./figures/script.png)
+![PMKID script](./figures/script-2.png)
 
 
 Hashcat cracking
