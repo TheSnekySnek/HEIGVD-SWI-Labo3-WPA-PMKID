@@ -52,6 +52,8 @@ def get_passphrase(pmkid, ssid, mac_ap, mac_sta):
 ssids = {} # dictionary of all found mac_ap related to their ssid
 found_macs = {} # dictionary of all processed mac_ap
 
+print("\nCracking Wifis with PMKID")
+print("=========================\n")
 for pkt in wpa:
     # check if we can find a ssid
     if pkt.haslayer(Dot11) and pkt.type == 0 and pkt.subtype == 8:
@@ -76,5 +78,5 @@ for pkt in wpa:
                 # bruteforce the passphrase
                 passphrase = get_passphrase(pmkid, ssids[mac_ap], mac_ap, mac_sta)
 
-                print("ssid: ", ssids[mac_ap])
-                print("passphrase: ", passphrase)
+                print("ssid:\t", ssids[mac_ap])
+                print("passphrase:\t", passphrase, "\n")
