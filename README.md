@@ -6,6 +6,16 @@
 
 # Sécurité des réseaux sans fil
 
+## Screenshots
+Pmkid cracking script
+
+![PMKID script](./figures/script.png)
+
+
+Hashcat cracking
+
+![PMKID script](./figures/hashcat.png)
+
 ## Laboratoire WPA - PMKID
 
 __A faire en équipes de deux personnes__
