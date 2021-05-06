@@ -78,5 +78,5 @@ for pkt in wpa:
                 # bruteforce the passphrase
                 passphrase = get_passphrase(pmkid, ssids[mac_ap], mac_ap, mac_sta)
 
-                print("ssid:\t", ssids[mac_ap])
+                print("ssid:\t\t", ssids[mac_ap])
                 print("passphrase:\t", passphrase, "\n")
